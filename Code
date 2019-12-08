@@ -1132,4 +1132,3 @@ plot(test, main = "PageValues", ylab = "PageValues", xlab = "Months", col = "dar
 lines(arimaMean, col="red")
 legend("topleft", lty = 1,bty = "n", col = c("red","blue"), c("Predicted","Actual"))
 ```
-
