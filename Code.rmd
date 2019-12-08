@@ -6,7 +6,7 @@ output: html_notebook
 Course: CIS-543 Programming for Big Data
 Term: Fall/T2
 
-Last modified date: 12/06/2019
+Last modified date: 12/08/2019
 
 Dataset avalaible:
 https://archive.ics.uci.edu/ml/datasets/Online+Shoppers+Purchasing+Intention+Dataset#
@@ -15,9 +15,9 @@ https://archive.ics.uci.edu/ml/datasets/Online+Shoppers+Purchasing+Intention+Dat
 ## Workspace preparation
 ### Approach
 ***
-In this section the workspace will be prepared. This means that first the global environment will be cleaned and all required packages will be loaded. 
-The data is hosted in a database in the aws Cloud and is loaded into R via a SQL connection. 
-The data is transformed into R accordingly (ELT).
+In this section the workspace will be prepared. This means that first the global environment will be cleaned, and all 
+required packages will be loaded. The data is hosted in a database in the aws Cloud and is loaded into R via a SQL 
+connection. The data is transformed into R accordingly (ELT).
 
 ***
 ### Clean Workspace
@@ -83,7 +83,7 @@ shopper_sessions <- dbSendQuery(mySQLConnection, "SELECT * FROM shopper_sessions
 # fetch() converts the query results (stored on the server) to a local data frame
 shopper_sessions <- fetch(shopper_sessions, n = -1)
 ```
-### Summary
+### Head of dataset
 ```{r}
 head(shopper_sessions)
 ```
@@ -112,25 +112,19 @@ shopper_sessions$ID <- c(1:length(shopper_sessions$Administrative))
 ## Data Understanding (EDA)
 ### Approach
 ***
-In this section the data are examined in more detail (exploratory data analysis). 
-The focus is on the target variable "Revenue". 
-Thus the relations of the different variables in connection with the characteristics Revenue = yes and Revenue = no are 
-examined. Finally, the correlations are presented.
+In this section the data are examined in more detail (exploratory data analysis). The focus is on the target variable 
+"Revenue". Thus, the relations of the different variables in connection with the characteristics Revenue = yes and Revenue = 
+no are examined. Finally, the correlations are presented.
 
 ***
 
 ### Numerical variables
 ```{r}
-# numerical variables
 shopper_sessions_numerical <- select(shopper_sessions, Administrative, Administrative_Duration, Informational, Informational_Duration, ProductRelated, ProductRelated_Duration, BounceRates, ExitRates, PageValues, SpecialDay)
 shopper_sessions_numerical
 ```
-### Categorical variables
-```{r}
-shopper_sessions_categorical <- select(shopper_sessions, OperatingSystems, Browser, Region, TrafficType, VisitorType, Weekend, Month, Revenue)
-shopper_sessions_categorical
-```
-### range numerical variables
+
+### Range numerical variables
 ```{r}
 range <- sapply(shopper_sessions_numerical, range)
 range <- as.data.frame(range)
@@ -153,17 +147,7 @@ sd
 mean_sd <- cbind(mean, sd)
 mean_sd
 ```
-### Values (range) categorical variables
-```{r}
-values <- as.data.frame(sapply(shopper_sessions_categorical, range))
-values
-```
-### Median categorical variables
-```{r}
-median <- as.data.frame(sapply(shopper_sessions_categorical[, 1:4], median))
-names(median)[1] <- "Median per categorical variables"
-median
-```
+
 ### Revenue per month
 ```{r}
 # Calculate Revenue per month
@@ -312,7 +296,7 @@ print(corrplot)
 ### Summary
 ***
 Analysis concerning the target variable Revenue shows that there are big differences between Revenue = Yes and Revenue = No 
-inspected by e.g. PageValues or Special day. If these differences are significant will be analysed in the next section 
+inspected by e.g. PageValues or Special day. If these differences are significant will be analyzed  in the next section 
 Hypothesis Testing.
 
 ***
@@ -407,9 +391,9 @@ Reject H0, there is sufficient evidence to warrant rejection of the claim that t
 
 ### Summary
 ***
-It could be statistically proven that significant differences between Revenue = yes and Revenue = no regarding variables in 
-the data set, such as bounce rates:
-It could be demonstrated that if Revenue = no, the Bounce Rates are greater in comparison Revenue = yes. This approach in 
+It is statistically proved that significant differences between Revenue = yes and Revenue = no regarding variables in the 
+data set, such as bounce rates:
+It is demonstrated that if Revenue = no, the Bounce Rates are greater in comparison Revenue = yes. This approach in 
 conclusion can be transferred to all Hypothesis tests.
 
 ***
@@ -423,7 +407,6 @@ The findings from the previous analyses are implemented. Thus rare instances of 
 e.g. Operating System with the characteristics 5,6,7,8 to "Other". 
 In preparation for the models, the data set is divided with the ratio 3:1 into training and test data with a random seed. The 
 models are trained with the training data and later evaluated with the test data.
-
 The following models are built to identify potential buyers:
 1. Logistic Regression Model
 2. Decision Tree (rpart)
@@ -740,6 +723,20 @@ aov <- aov(Accuracy ~ Model, data = TruePositive)
 summary(aov)
 TukeyHSD(aov)
 ```
+### Print out the significant differences
+```{r}
+# Safe Tukey test
+Tukey <- TukeyHSD(aov)
+Tukey <- as.data.frame(Tukey$Model)
+# Print results
+cat("P-Value Log regression - ctree: ", Tukey$`p adj`[1],", reject H0 - sig. difference.", "\n")
+cat("P-Value Naive Bayes - ctree: ", Tukey$`p adj`[2],", fail to reject H0, no sig. differnce.", "\n")
+cat("P-Value rpart - ctree: ", Tukey$`p adj`[3],", fail to reject H0, no sig. differnce.", "\n")
+cat("P-Value Naive Bayes - Log regression: ", Tukey$`p adj`[4],", reject H0 - sig. difference.", "\n")
+cat("P-Value rpart - Log regression: ", Tukey$`p adj`[5],", reject H0 - sig. difference.", "\n")
+cat("P-Value rpart - Naive Bayes: ", Tukey$`p adj`[6],", fail to reject H0, no sig. differnce.")
+```
+
 
 ### Summary
 ***
@@ -872,6 +869,7 @@ legend("bottomright", legend = c(paste0("Logistic Regression Train (AUC = ", auc
 Concerning the AUC values ctree is performaing the best. For this project the performance measuerment is focusing on 
 accuracy. Regardless this, there is no big difference between Train ROC and Test ROC for all models, so there is no 
 overfitting.
+
 ***
 
 ## Linear Regression
@@ -1166,7 +1164,7 @@ PageValue_Month
 ggplot(data = PageValue_Month, mapping = aes(x = Month, y = PageValues)) +
   geom_col() +
   geom_text(aes(label = round(PageValues, 4)), position = position_stack(vjust = 0.5), col = "white") +
-  labs(title = "PageValues per Month")
+  labs(title = "Average PageValues per Month")
   
 ```
 
