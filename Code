@@ -1,0 +1,1134 @@
+---
+title: "Final Project: Identification of potential buyers for eCommerce"
+author: "Chen, Ruoying | Wang, Huan | Franke, Max"
+output: html_notebook
+---
+Course: CIS-543 Programming for Big Data
+Term: Fall/T2
+
+Last modified date: 12/06/2019
+
+Dataset avalaible:
+https://archive.ics.uci.edu/ml/datasets/Online+Shoppers+Purchasing+Intention+Dataset#
+
+# Identification of potential buyers for eCommerce  {.tabset .tabset-fade .tabset-pills}
+## Workspace preparation
+### Approach
+***
+In this section the workspace will be prepared. This means that first the global environment will be cleaned and all required packages will be loaded. The data is hosted in a database in the aws Cloud and is loaded into R via a SQL connection. The data is transformed into R accordingly (ELT).
+
+***
+### Clean Workspace
+```{r}
+rm(list = ls())
+```
+
+### Install libraries
+```{r}
+#install.packages("tidyverse")
+#install.packages("lubridate")
+#install.packages("rockchalk")
+#install.packages("corrplot")
+#install.packages("ggcorrplot")
+#install.packages("e1071")
+#install.packages("ROCR")
+#install.packages("rpart")
+#install.packages("rpart.plot")
+#install.packages("caTools")
+#install.packages("party")
+#install.packages("knitr")
+#install.packages("rmarkdown")
+#install.packages("forecast")
+#install.packages("RMySQL")
+#install.packages("DBI")
+#install.packages("dplyr")
+```
+
+### Load Packages
+```{r}
+library(tidyverse)
+library(lubridate)
+library(rockchalk)
+library(zoo)
+library(corrplot)
+library(e1071)
+library(ROCR)
+library(rpart)
+library(rpart.plot)
+library(caTools)
+library(party)
+library(knitr)
+library(rmarkdown)
+library(forecast)
+library(RMySQL)
+library(DBI)
+library(dplyr)
+```
+### Establish Connection
+```{r}
+mySQLConnection <- dbConnect(MySQL(),
+                             user = "bigdata",
+                             password = "password",
+                             dbname = "bigdata",
+                             host = "bigdata.cxeixakp0jsm.us-east-1.rds.amazonaws.com",
+                             port = 3306)
+```
+### Query Data
+```{r}
+# Send the query
+shopper_sessions <- dbSendQuery(mySQLConnection, "SELECT * FROM shopper_sessions")
+
+# fetch() converts the query results (stored on the server) to a local data frame
+shopper_sessions <- fetch(shopper_sessions, n = -1)
+```
+### Summary
+```{r}
+head(shopper_sessions)
+```
+
+### Transforming data types
+```{r}
+shopper_sessions$Administrative <- as.numeric(shopper_sessions$Administrative)
+shopper_sessions$Administrative_Duration <- as.numeric(shopper_sessions$Administrative_Duration)
+shopper_sessions$Informational <- as.numeric(shopper_sessions$Informational)
+shopper_sessions$Informational_Duration <- as.numeric(shopper_sessions$Informational_Duration)
+shopper_sessions$ProductRelated <- as.numeric(shopper_sessions$ProductRelated)
+shopper_sessions$ProductRelated_Duration <- as.numeric(shopper_sessions$ProductRelated_Duration)
+shopper_sessions$BounceRates <- as.numeric(shopper_sessions$BounceRates)
+shopper_sessions$ExitRates <- as.numeric(shopper_sessions$ExitRates)
+shopper_sessions$PageValues <- as.numeric(shopper_sessions$PageValues)
+shopper_sessions$SpecialDay <- as.numeric(shopper_sessions$SpecialDay)
+shopper_sessions$Month <- as.yearmon(shopper_sessions$Month, "%b")
+shopper_sessions$Month <- month(shopper_sessions$Month, label = TRUE)
+shopper_sessions$Weekend[shopper_sessions$Weekend == FALSE] <- "No"
+shopper_sessions$Weekend[shopper_sessions$Weekend == TRUE] <- "Yes"
+shopper_sessions$Revenue[shopper_sessions$Revenue == FALSE] <- "No"
+shopper_sessions$Revenue[shopper_sessions$Revenue == TRUE] <- "Yes"
+shopper_sessions$RevenueNum <- if_else(shopper_sessions$Revenue == "No", 0, 1)
+shopper_sessions$ID <- c(1:length(shopper_sessions$Administrative))
+```
+## Data Understanding (EDA)
+### Approach
+***
+In this section the data are examined in more detail (exploratory data analysis). The focus is on the target variable "Revenue". Thus the relations of the different variables in connection with the characteristics Revenue = yes and Revenue = no are examined. Finally, the correlations are presented.
+
+***
+
+### Numerical variables
+```{r}
+# numerical variables
+shopper_sessions_numerical <- select(shopper_sessions, Administrative, Administrative_Duration, Informational, Informational_Duration, ProductRelated, ProductRelated_Duration, BounceRates, ExitRates, PageValues, SpecialDay)
+shopper_sessions_numerical
+```
+### Categorical variables
+```{r}
+shopper_sessions_categorical <- select(shopper_sessions, OperatingSystems, Browser, Region, TrafficType, VisitorType, Weekend, Month, Revenue)
+shopper_sessions_categorical
+```
+### range numerical variables
+```{r}
+range <- sapply(shopper_sessions_numerical, range)
+range <- as.data.frame(range)
+range
+```
+### Mean numerical variables
+```{r}
+mean <- sapply(shopper_sessions_numerical, mean)
+mean <- as.data.frame(mean)
+mean
+```
+### Standard deviation numerical variables
+```{r}
+sd <- sapply(shopper_sessions_numerical, sd)
+sd <- as.data.frame(sd)
+sd
+```
+### Bind mean and sd
+```{r}
+mean_sd <- cbind(mean, sd)
+mean_sd
+```
+### Values (range) categorical variables
+```{r}
+values <- as.data.frame(sapply(shopper_sessions_categorical, range))
+values
+```
+### Median categorical variables
+```{r}
+median <- as.data.frame(sapply(shopper_sessions_categorical[, 1:4], median))
+names(median)[1] <- "Median per categorical variables"
+median
+```
+### Revenue per month
+```{r}
+# Calculate Revenue per month
+Revenue_Month <- shopper_sessions %>% 
+  select(Month, Revenue, ID) %>% 
+  group_by(Month, Revenue) %>% 
+  summarise(RevenueMonth = sum(ID))
+# Plot mean revenue per month
+plot1 <- ggplot(Revenue_Month, aes(x = Month, y = RevenueMonth)) + 
+  geom_col(aes(fill = Revenue), width = 0.7) +
+  labs(title = "Revenue per month",
+       x = "Month",
+       y = "Quantity revenue")
+print(plot1)
+```
+### Revenue per VisitorType
+```{r}
+# Calculate Revenue per VisitorType
+Revenue_VisitorType <- shopper_sessions %>% 
+  select(VisitorType, Revenue, ID) %>% 
+  group_by(VisitorType, Revenue) %>% 
+  summarise(RevenueVisitorType = sum(ID))
+Revenue_VisitorType <- Revenue_VisitorType[-c(3,4),]
+# Plot mean revenue per month
+plot2 <- ggplot(Revenue_VisitorType, aes(x = VisitorType, y = RevenueVisitorType)) + 
+  geom_col(aes(fill = Revenue), width = 0.7) +
+  labs(title = "Revenue per VisitorType",
+       x = "VisitorType",
+       y = "Quantity revenue")
+print(plot2)
+```
+### Revenue per Weekend
+```{r}
+# Calculate Revenue per Weekend
+Revenue_Weekend <- shopper_sessions %>% 
+  select(Weekend, Revenue, ID) %>% 
+  group_by(Weekend, Revenue) %>% 
+  summarise(RevenueWeekend = sum(ID))
+# Plot mean revenue per month
+plot3 <- ggplot(Revenue_Weekend, aes(x = Weekend, y = RevenueWeekend)) + 
+  geom_col(aes(fill = Revenue), width = 0.7) +
+  labs(title = "Revenue per Weekend",
+       x = "Weekend",
+       y = "Quantity revenue")
+print(plot3)
+```
+### Percentage of target variable Revenue
+```{r}
+# Calculate percentage of target variable Revenue
+tbl_target <- table(shopper_sessions$RevenueNum)
+tbl_target <- prop.table(tbl_target)
+tbl_target <- as.data.frame(tbl_target)
+names(tbl_target)[1] <- "Revenue"
+tbl_target$RevenueString <- if_else(tbl_target$Revenue == "0", "No", "Yes")
+# Plot Revenue percentage
+plot4 <- ggplot(tbl_target, aes(x = RevenueString, y = Freq)) + 
+  geom_bar(stat="identity", width=.5, position = "dodge") +
+  geom_text(aes(label = round(Freq, 4)), position = position_stack(vjust = 0.5), col = "white") +
+  labs(title = "Percentage of target variable Revenue",
+       x = "Revenue",
+       y = "Percentage")
+print(plot4)
+```
+### Product Related and Product Related Duration
+```{r}
+# Product Related and Product Related Duration
+plot5 <- ggplot(data = shopper_sessions, mapping = aes(x = ProductRelated, y = ProductRelated_Duration, col = Revenue)) +
+  geom_point() +
+  geom_smooth(se = F, method = "lm") +
+  labs(title = "Product Related vs. Time Duration")
+  #xlim(0, 400) +
+  #ylim(0, 20000)
+print(plot5)
+```
+### Bounce Rate vs Revenue
+```{r}
+# Calculate Bounce Rate vs Revenue
+Revenue_BounceRates <- shopper_sessions %>% 
+  select(BounceRates, Revenue) %>% 
+  group_by(Revenue) %>% 
+  summarise(RevenueBounceRates = mean(BounceRates))
+# Plot
+plot6 <- ggplot(data = Revenue_BounceRates, mapping = aes(x = Revenue, y = RevenueBounceRates)) +
+  geom_bar(stat="identity", width=.5, position = "dodge") +
+  geom_text(aes(label = round(RevenueBounceRates, 4)), position = position_stack(vjust = 0.5), col = "white") +
+  labs(title = "Average Bounce Rate vs Revenue",
+       y = "Average Bounce Rates")
+print(plot6)
+```
+### Exit Rates vs Revenue
+```{r}
+# Calculate Exit Rates vs Revenue
+Revenue_ExitRates <- shopper_sessions %>% 
+  select(ExitRates, Revenue) %>% 
+  group_by(Revenue) %>% 
+  summarise(RevenueExitRates = mean(ExitRates))
+# Plot
+plot7 <- ggplot(data = Revenue_ExitRates, mapping = aes(x = Revenue, y = RevenueExitRates)) +
+  geom_bar(stat="identity", width=.5, position = "dodge") +
+  geom_text(aes(label = round(RevenueExitRates, 4)), position = position_stack(vjust = 0.5), col = "white") +
+  labs(title = "Average Exit Rates vs Revenue",
+       y = "Average Exit Rates")
+print(plot7)
+```
+### Page Value vs Revenue
+```{r}
+# Calculate Page Value vs Revenue
+Revenue_PageValues <- shopper_sessions %>% 
+  select(PageValues, Revenue) %>% 
+  group_by(Revenue) %>% 
+  summarise(RevenuePageValues = mean(PageValues))
+# Plot
+plot8 <- ggplot(data = Revenue_PageValues, mapping = aes(x = Revenue, y = RevenuePageValues)) +
+  geom_bar(stat="identity", width=.5, position = "dodge") +
+  geom_text(aes(label = round(RevenuePageValues, 4)), position = position_stack(vjust = 0.5), col = "white") +
+  labs(title = "Average Page Value vs Revenue",
+       y = "Average Page Value")
+print(plot8)
+```
+### Special Day vs Revenue
+```{r}
+# Calculate Special Day vs Revenue
+Revenue_SpecialDay <- shopper_sessions %>% 
+  select(SpecialDay, Revenue) %>% 
+  group_by(Revenue) %>% 
+  summarise(RevenueSpecialDay = mean(SpecialDay))
+# Plot
+plot9 <- ggplot(data = Revenue_SpecialDay, mapping = aes(x = Revenue, y = RevenueSpecialDay)) +
+  geom_bar(stat="identity", width=.5, position = "dodge") +
+  geom_text(aes(label = round(RevenueSpecialDay, 4)), position = position_stack(vjust = 0.5), col = "white") +
+  labs(title = "Average Special Day vs Revenue",
+       y = "Average Special Day")
+print(plot9)
+```
+### Correlation for metric variables
+```{r}
+# Correlation
+cor <- cor(shopper_sessions_numerical,
+           use = "pairwise")
+print(cor)
+# Corrplot
+corrplot <- corrplot(cor, method = "square")
+print(corrplot)
+```
+## Hypothesis Testing
+### Approach
+***
+In this section different hypotheses regarding Revenue are examined. In preparation, all box plots of numerical variables, divided by revenue (yes, no), are presented. For the most part, the observations from the exploratory data analysis are confirmed. Thus, the mean value of Page Values in the case of Revenue = yes is significant greater.
+
+***
+
+### Boxplot of numerical variables vs Revenue
+```{r}
+# Preparation
+shopper_sessions_numerical$Revenue <- shopper_sessions$Revenue
+namesNumerical <- names(shopper_sessions_numerical)
+
+# for every numerical var. print boxplot vs Revenue
+for (i in namesNumerical) {
+  if(i != "Revenue"){
+    print(ggplot(data = shopper_sessions_numerical, aes_string(x = "Revenue", y = i)) +
+            geom_point(aes(colour = Revenue), alpha = 0.2, position = "jitter") +
+            geom_boxplot(outlier.size=2, alpha=0.1) +
+            guides(colour = FALSE) +
+            labs(title = paste0("Revenue vs. ", i)))
+  }
+}
+```
+***
+### Testing for numerical variables vs Revenue
+#### Adminstrative: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = Administrative ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "less")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean Yes for Administrative is greater (muY>muN)
+
+#### Administrative_Duration: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = Administrative_Duration ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "less")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean Yes for Administrative_Duration is greater (muY>muN)
+
+#### Informational: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = Informational ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "less")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean Yes for Informational is greater (muY>muN)
+
+#### Informational_Duration: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = Informational_Duration ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "less")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean Yes for Informational_Duration is greater (muY>muN)
+
+#### ProductRelated: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = ProductRelated ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "less")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean Yes for ProductRelated is greater (muY>muN)
+
+#### ProductRelated_Duration: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = ProductRelated_Duration ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "less")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean Yes for ProductRelated_Duration is greater (muY>muN)
+
+#### Bounce Rates: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = BounceRates ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "greater")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean No for Bounce Rate is greater (muN>muY)
+
+#### Exit Rates: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = ExitRates ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "greater")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean No for Exit Rates is greater (muN>muY)
+
+#### Page Value: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = PageValues ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "less")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean Yes for Page Values is greater (muY>muN)
+
+#### Special Day: H0: mu1=mu2 [assuming normality]
+```{r}
+wilcox.test(formula = SpecialDay ~ Revenue, data = shopper_sessions, paired = FALSE, alternative = "greater")
+```
+Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean No for Page Values is greater (muN>muY)
+
+***
+
+## Model Building & Prediction
+### Approach
+***
+In this section the models to answer the main problem are built and predicted. First the workspace is cleaned again and the dataset is imported in raw version (connection to Cloud Database). In addition, the data is then transformed. 
+The findings from the previous analyses are implemented. Thus rare instances of selected categorical variables are combined, e.g. Operating System with the characteristics 5,6,7,8 to "Other". 
+In preparation for the models, the data set is divided with the ratio 3:1 into training and test data with a random seed. The models are trained with the training data and later evaluated with the test data.
+The following models are built to identify potential buyers:
+1. Logistic Regression Model
+2. Decision Tree (rpart)
+3. decision tree (ctree)
+4. Naive Bayes
+Finally, the models are predicted in conjunction with the test data set.
+
+***
+
+### Datasets as start and summarize rare instances of selected categorical variables
+#### Clean workspace
+```{r}
+rm(list = ls())
+```
+#### Establish Connection
+```{r}
+mySQLConnection <- dbConnect(MySQL(),
+                             user = "bigdata",
+                             password = "password",
+                             dbname = "bigdata",
+                             host = "bigdata.cxeixakp0jsm.us-east-1.rds.amazonaws.com",
+                             port = 3306)
+```
+#### Query Data
+```{r}
+# Send the query
+shopper_sessions <- dbSendQuery(mySQLConnection, "SELECT * FROM shopper_sessions")
+
+# fetch() converts the query results (stored on the server) to a local data frame
+shopper_sessions <- fetch(shopper_sessions, n = -1)
+```
+#### Transforming data types
+```{r}
+shopper_sessions$Administrative <- as.numeric(shopper_sessions$Administrative)
+shopper_sessions$Administrative_Duration <- as.numeric(shopper_sessions$Administrative_Duration)
+shopper_sessions$Informational <- as.numeric(shopper_sessions$Informational)
+shopper_sessions$Informational_Duration <- as.numeric(shopper_sessions$Informational_Duration)
+shopper_sessions$ProductRelated <- as.numeric(shopper_sessions$ProductRelated)
+shopper_sessions$ProductRelated_Duration <- as.numeric(shopper_sessions$ProductRelated_Duration)
+shopper_sessions$BounceRates <- as.numeric(shopper_sessions$BounceRates)
+shopper_sessions$ExitRates <- as.numeric(shopper_sessions$ExitRates)
+shopper_sessions$PageValues <- as.numeric(shopper_sessions$PageValues)
+shopper_sessions$SpecialDay <- as.numeric(shopper_sessions$SpecialDay)
+shopper_sessions$Month <- as.yearmon(shopper_sessions$Month, "%b")
+shopper_sessions$Month <- month(shopper_sessions$Month, label = TRUE)
+shopper_sessions$Weekend[shopper_sessions$Weekend == FALSE] <- "No"
+shopper_sessions$Weekend[shopper_sessions$Weekend == TRUE] <- "Yes"
+shopper_sessions$VisitorType <- as.factor(shopper_sessions$VisitorType)
+shopper_sessions$Weekend <- as.factor(shopper_sessions$Weekend)
+shopper_sessions$Revenue[shopper_sessions$Revenue == FALSE] <- "No"
+shopper_sessions$Revenue[shopper_sessions$Revenue == TRUE] <- "Yes"
+shopper_sessions$Revenue <- as.factor(shopper_sessions$Revenue)
+# Summarize rare instances of selected categorical variables
+# 5 to 8 of Operating Systems
+shopper_sessions$OperatingSystems <-  as.factor(shopper_sessions$OperatingSystems)
+shopper_sessions$OperatingSystems <- combineLevels(shopper_sessions$OperatingSystems, levs = c("5","6", "7", "8"), newLabel = "Other")
+# Browser: 8, 9, 11, 12, 13, 7 & 3
+shopper_sessions$Browser <- as.factor(shopper_sessions$Browser)
+shopper_sessions$Browser <- combineLevels(shopper_sessions$Browser, levs = c("8","9", "11", "12", "13", "7", "3"), newLabel = "Other")
+# Traffic Type: 7, 9, 12, 14, 15, 16, 17, 18
+shopper_sessions$TrafficType <- as.factor(shopper_sessions$TrafficType)
+shopper_sessions$TrafficType <- combineLevels(shopper_sessions$TrafficType, levs = c("7","9", "12", "14", "15", "16", "17", "18"), newLabel = "Other")
+head(shopper_sessions)
+```
+### Create training and test data
+```{r}
+require(caTools)
+
+# Set the random seed for repeatability
+set.seed(123)
+
+# Split the data into Ratio 3:1
+sample <- sample.split(shopper_sessions$Revenue, SplitRatio = .75)
+train <- subset(shopper_sessions, sample == TRUE)
+test <- subset(shopper_sessions, sample == FALSE)
+
+# Data sets with all independent variables for training the dependent variable "Revenue"
+train_x <- train[,-which(names(train) %in% "Revenue")]
+train_y <- factor(train$Revenue)
+
+# Data sets with all independent variables for test the dependent variable "Revenue"
+test_x <- test[,-which(names(test) %in% "Revenue")]
+test_y <- factor(test$Revenue)
+```
+***
+### Logistic Regression Model
+```{r}
+# Preparation
+train_num <- select(train, Administrative, Administrative_Duration, Informational, Informational_Duration, ProductRelated, ProductRelated_Duration, BounceRates, ExitRates, PageValues, SpecialDay, Revenue)
+test_num <- select(test, Administrative, Administrative_Duration, Informational, Informational_Duration, ProductRelated, ProductRelated_Duration, BounceRates, ExitRates, PageValues, SpecialDay, Revenue)
+
+# Build model
+glm_model <- glm(formula = Revenue ~., data = train_num, family = binomial(link = "logit"))
+summary(glm_model)
+
+# Create glm model 2, just with sig values from glm model
+glm_model2 <- glm(formula = Revenue ~ ProductRelated + ExitRates + PageValues + SpecialDay, data = train_num, family = binomial(link = "logit"))
+summary(glm_model2)
+
+```
+***
+### Decision Tree (rpart)
+#### Build model
+```{r}
+dt_model <- rpart(formula =  Revenue ~., data = train, 
+                  method = "class", control = rpart.control(cp = 0.0001))
+printcp(dt_model)
+```
+#### Visualize complexity parameters
+```{r}
+plotcp(dt_model)
+```
+#### Optimize complexity parameters
+```{r}
+dt_model <- rpart(formula =  Revenue ~ ., data = train, 
+                  method = "class", control = rpart.control(cp = 0.001))
+# Print model
+printcp(dt_model)
+```
+#### Visualize Decision Tree
+```{r}
+rpart.plot(dt_model, main = "Decision Tree")
+```
+#### Importance of variables
+```{r}
+importance.dt <- dt_model$variable.importance
+barplot(dt_model$variable.importance, main ="Importance of variables",horiz = TRUE, las = 1, cex.names = 0.5)
+```
+***
+### Decision Tree (ctree)
+```{r}
+dt_model2 <- ctree(Revenue ~ ., data = train)
+```
+#### Plot the tree
+```{r}
+plot(dt_model2)
+```
+***
+### Naive Bayes
+```{r}
+nb_model <- naiveBayes(Revenue ~ ., data = train, laplace = 20)
+nb_model
+```
+***
+### Prediction
+```{r}
+pred_test_glm <- predict(glm_model2, test_num, type = "response")
+pred_test_dt <- predict(dt_model, newdata = test, type = "class")
+pred_test_dt2 <- predict(dt_model2, test)
+pred_test_nb <- predict(nb_model, newdata = test, type = "class")
+```
+## Performance Measurement
+### Approach
+***
+In this section the models are evaluated according two criteria Accuracy & AUC values, whereby the decision for the best model is made on the basis of Accuracy.
+In order to calculate the accuracy, the confusion matrixes are first established, whereby the predictions still have to be transformed with regard to the "logistic regression" model into "yes" and "no". Using the elements of the confusion matrix (TP,TN,FP,FN) and the other results (Actual and Prediction data frame), the accuracy is calculated and presented. Finally, it is examined whether there is a significant difference between the models with regard to accuracy. 
+The package ROCR is used to calculate the AUC values and ROC curves. Therefore, a prediction obejct is first created that brings the input data into a standardized form. Then ROC and AUC are determined and plotted with the ROC curves of all models with corresponding AUC values. Finally, the extent to which the training vs. test ROC and AUC values differ is examined with regard to overfitting. 
+
+***
+
+### Confusion matrix
+```{r}
+glm_confusion_matrix <- table(test_num$Revenue, pred_test_glm, dnn = c("Actual", "Prediction"))
+dt_confusion_matrix <- table(test$Revenue, pred_test_dt, dnn = c("Actual", "Prediction"))
+dt2_confusion_matrix <- table(test$Revenue, pred_test_dt2, dnn = c("Actual", "Prediction"))
+nb_confusion_matrix <- table(test$Revenue, pred_test_nb, dnn = c("Actual", "Prediction"))
+
+# Print [glm shows probabilities and is not useful to be displayed now]
+print(dt_confusion_matrix)
+print(dt2_confusion_matrix)
+print(nb_confusion_matrix)
+```
+### Output results
+```{r}
+glm_results <- data.frame(Actual = test_num$Revenue,
+                          Prediction = pred_test_glm)
+
+dt_results <- data.frame(Actual = test_num$Revenue,
+                          Prediction = pred_test_dt)
+
+dt2_results <- data.frame(Actual = test_num$Revenue,
+                          Prediction = pred_test_dt2)
+
+nb_results <- data.frame(Actual = test_num$Revenue,
+                          Prediction = pred_test_nb)
+print(glm_results)
+print(dt_results)
+print(dt2_results)
+print(nb_results)
+```
+***
+### Transform Prediction for logistic regression
+```{r}
+glm_results$Prediction <- if_else(glm_results$Prediction > 0.5, "yes", "no")
+print(glm_results)
+```
+***
+### Accuracy calculation
+#### Logisitc regression
+```{r}
+# Elements of confusion matrix
+TP <- subset(glm_results, Actual == "Yes", Prediction == "Yes")
+TN <- subset(glm_results, Actual == "No", Prediction == "No")
+FN <- subset(glm_results, Actual == "Yes", Prediction == "No")
+FP <- subset(glm_results, Actual == "No", Prediction == "Yes")
+# Calculate Accuracy
+glm_accuracy <- (nrow(TP)+nrow(TN))/ (nrow(TP)+nrow(TN)+nrow(FN)+nrow(FP))
+# Output results
+cat("Accuracy for log regression is: ", glm_accuracy, "\n")
+
+# Save Accuracy for comparison
+glm_TP <- if_else(glm_results$Actual == glm_results$Prediction, 1, 0)
+glm_TP <- as.data.frame(glm_TP)
+glm_TP$Model <- "Log regression"
+names(glm_TP)[1] <- "Accuracy"
+```
+
+#### Decision tree rpart
+```{r}
+# Elements of confusion matrix
+TP <- dt_confusion_matrix[2,2]
+TN <- dt_confusion_matrix[1,1]
+FN <- dt_confusion_matrix[1,2]
+FP <- dt_confusion_matrix[2,1]
+# Calculate Accuracy
+dt_accuracy <- (TP+TN)/sum(TP, TN, FN, FP)
+# Output results
+cat("Accuracy for rpart is: ", dt_accuracy, "\n")
+
+# Save Accuracy for ctree
+dt_TP <- if_else(dt_results$Actual == dt_results$Prediction, 1, 0)
+dt_TP <- as.data.frame(dt_TP)
+dt_TP$Model <- "rpart"
+names(dt_TP)[1] <- "Accuracy"
+```
+
+#### Decision tree ctree
+```{r}
+# Elements of confusion matrix
+TP <- dt2_confusion_matrix[2,2]
+TN <- dt2_confusion_matrix[1,1]
+FN <- dt2_confusion_matrix[1,2]
+FP <- dt2_confusion_matrix[2,1]
+# Calculate Accuracy
+dt2_accuracy <- (TP+TN)/sum(TP, TN, FN, FP)
+# Output results
+cat("Accuracy for ctree is: ", dt2_accuracy, "\n")
+
+# Save Accuracy for ctree
+dt2_TP <- if_else(dt2_results$Actual == dt2_results$Prediction, 1, 0)
+dt2_TP <- as.data.frame(dt2_TP)
+dt2_TP$Model <- "ctree"
+names(dt2_TP)[1] <- "Accuracy"
+```
+
+#### Naive Bayes
+```{r}
+# Elements of confusion matrix
+TP <- nb_confusion_matrix[2,2]
+TN <- nb_confusion_matrix[1,1]
+FN <- nb_confusion_matrix[1,2]
+FP <- nb_confusion_matrix[2,1]
+# Calculate Accuracy
+nb_accuracy <- (TP+TN)/sum(TP, TN, FN, FP)
+# Output results
+cat("Accuracy for Naive Bayes is: ", nb_accuracy, "\n")
+
+# Save Accuracy for Naive Bayes
+nb_TP <- if_else(nb_results$Actual == nb_results$Prediction, 1, 0)
+nb_TP <- as.data.frame(dt_TP)
+nb_TP$Model <- "Naive Bayes"
+names(dt_TP)[1] <- "Accuracy"
+```
+***
+### Accuracy comparison
+```{r}
+compare <- data.frame(Method = c("04-Logistic Regression", "03-Naive Bayes", "01-Decision Tree rpart", "02-Decision Tree ctree"),
+                      Accuracy = c(glm_accuracy, nb_accuracy, dt_accuracy, dt2_accuracy))
+compare
+ggplot(data = compare, mapping = aes(x = Method, y = Accuracy)) +
+  geom_col() +
+  geom_text(aes(label = round(Accuracy, 4)), position = position_stack(vjust = 0.5), col = "white") +
+  labs(title = "Accuracy comparison between different models")
+  
+TruePositive <- rbind(glm_TP, dt_TP, dt2_TP, nb_TP)
+TruePositive <- as.data.frame(TruePositive)
+TruePositive$Model <- as.factor(TruePositive$Model)
+aov <- aov(Accuracy ~ Model, data = TruePositive)
+summary(aov)
+TukeyHSD(aov)
+```
+***
+### Performance Measurement (ROCR)
+### Prediction with probalities
+```{r}
+pred_test_glm <- predict(glm_model, test_x, type = "response")
+pred_test_dt <- predict(dt_model, newdata = test, type = "prob")
+pred_test_dt2 <- sapply(predict(dt_model2, newdata = test_x, type="prob"),'[[',2)
+pred_test_nb <- predict(nb_model, newdata = test_x, type = "raw")
+```
+### Creating a prediction object (transform input data into a standardized format)
+```{r}
+prediction_test_dt <- prediction(pred_test_dt[,2], labels = test$Revenue)
+prediction_test_dt2 <- prediction(pred_test_dt2, labels = test$Revenue)
+prediction_test_nb <- prediction(pred_test_nb[,2], labels = test$Revenue)
+prediction_test_glm <- prediction(pred_test_glm, labels = test$Revenue)
+```
+***
+### ROC & AUC
+#### Calculate ROC
+```{r}
+roc_test_dt <- performance(prediction_test_dt, measure ="tpr", x.measure ="fpr")
+roc_test_dt2 <- performance(prediction_test_dt2, measure = "tpr", x.measure = "fpr")
+roc_test_nb <- performance(prediction_test_nb, measure = "tpr", x.measure = "fpr")
+roc_test_glm <- performance(prediction_test_glm, measure="tpr", x.measure="fpr")
+```
+#### Calculate AUC
+```{r}
+auc_test_dt <- performance(prediction_test_dt, measure = "auc")
+auc_test_dt2 <- performance(prediction_test_dt2, measure = "auc")
+auc_test_nb <- performance(prediction_test_nb, measure = "auc")
+auc_test_glm <- performance(prediction_test_glm, measure = "auc")
+```
+#### Output of AUC values rounded depending on model 
+```{r}
+auc_test_dt <- round(auc_test_dt@y.values[[1]], 4)
+auc_test_dt2 <- round(auc_test_dt2@y.values[[1]], 4)
+auc_test_nb <- round(auc_test_nb@y.values[[1]], 4)
+auc_test_glm <- round(auc_test_glm@y.values[[1]], 4)
+```
+#### Plot of all ROC curves with corresponding AUC values for visual comparison
+```{r}
+plot(roc_test_dt, main = "All ROC curves")
+plot(roc_test_dt2, add = TRUE, col = "darkgreen")
+plot(roc_test_nb, add = TRUE, col = "red")
+plot(roc_test_glm, add = TRUE, col = "blue")
+abline(0,1, col = "grey", lty = 2)
+legend("bottomright", legend = c(paste0("Decision Tree rpart (AUC = ", auc_test_dt, ")"),
+                                 paste0("Decision Tree ctree (AUC = ", auc_test_dt2, ")"),
+                                 paste0("Naive Bayes (AUC = ", auc_test_nb, ")"),
+                                 paste0("Logistic Regression (AUC = ", auc_test_glm, ")")),
+       col = c("black","darkgreen","red","blue"), lty = c(1,1,1,1))
+```
+***
+### Plot Test-AUC vs Train-AUC
+#### Decision Tree rpart Test vs Train ROC & AUC
+```{r}
+# Calculate values for train
+pred_train_dt <- predict(dt_model, newdata = train_x, type = "prob")
+prediction_train_dt <- prediction(pred_train_dt[,2], labels = train$Revenue)
+roc_train_dt <- performance(prediction_train_dt, measure="tpr", x.measure="fpr")
+auc_train_dt <- performance(prediction_train_dt, measure="auc")
+auc_train_dt <- round(auc_train_dt@y.values[[1]], 4)
+# Plot
+plot(roc_train_dt, main = "Decision Tree rpart: Train-ROC vs Test-ROC")
+plot(roc_test_dt, add = TRUE, col = "red")
+abline(0,1, col = "grey", lty = 2)
+legend("bottomright", legend = c(paste0("Decision Tree Train (AUC = ", auc_train_dt, ")"),
+                                 paste0("Decision Tree Test (AUC = ", auc_test_dt, ")")),
+       col = c("black", "red"), lty = c(1,1))
+```
+#### Decision Tree ctree Test vs Train ROC & AUC
+```{r}
+# Calculate values for train
+pred_train_dt2 <- sapply(predict(dt_model2, newdata = train_x, type = "prob"),'[[',2)
+prediction_train_dt2 <- prediction(pred_train_dt2, labels = train$Revenue)
+roc_train_dt2 <- performance(prediction_train_dt2, measure = "tpr", x.measure = "fpr")
+auc_train_dt2 <- performance(prediction_train_dt2, measure = "auc")
+auc_train_dt2 <- round(auc_train_dt2@y.values[[1]], 4)
+# Plot
+plot(roc_train_dt2, main = "Decision Tree ctree: Train-ROC vs. Test-ROC")
+plot(roc_test_dt2, add = TRUE, col = "red")
+abline(0,1, col = "grey", lty = 2)
+legend("bottomright", legend = c(paste0("Decision Tree Train (AUC = ", auc_train_dt2, ")"),
+                                 paste0("Decision Tree Test (AUC = ", auc_test_dt2, ")")),
+       col = c("black", "red"), lty = c(1,1))
+```
+#### Naive Bayes Test vs Train ROC & AUC
+```{r}
+# Calculate values for train
+pred_train_nb <- predict(nb_model, newdata = train_x, type = "raw")
+prediction_train_nb <- prediction(pred_train_nb[,2], labels = train$Revenue)
+roc_train_nb <- performance(prediction_train_nb, measure="tpr", x.measure="fpr")
+auc_train_nb <- performance(prediction_train_nb, measure="auc")
+auc_train_nb <- round(auc_train_nb@y.values[[1]], 4)
+# Plot
+plot(roc_train_nb, main = "Naive Bayes: Train-ROC vs Test-ROC")
+plot(roc_test_nb, add = TRUE, col = "red")
+abline(0,1, col = "grey", lty = 2)
+legend("bottomright", legend = c(paste0("Naive Bayes Train (AUC = ", auc_train_nb, ")"),
+                                 paste0("Naive Bayes Test (AUC = ", auc_test_nb, ")")),
+       col = c("black", "red"), lty = c(1,1))
+```
+#### Logistic Regression vs Train ROC & AUC
+```{r}
+# Calculate values for train
+pred_train_glm <- predict(glm_model, newdata = train_x, type = "response")
+prediction_train_glm <- prediction(pred_train_glm, labels = train$Revenue)
+roc_train_glm <- performance(prediction_train_glm, measure="tpr", x.measure="fpr")
+auc_train_glm <- performance(prediction_train_glm, measure="auc")
+auc_train_glm <- round(auc_train_glm@y.values[[1]], 4)
+# Plot
+plot(roc_train_glm, main = "Logistic Regression: Train-ROC vs Test-ROC")
+plot(roc_test_glm, add = TRUE, col = "red")
+abline(0,1, col = "grey", lty = 2)
+legend("bottomright", legend = c(paste0("Logistic Regression Train (AUC = ", auc_train_glm, ")"),
+                                 paste0("Logistic Regression Test (AUC = ", auc_test_glm, ")")),
+       col = c("black", "red"), lty = c(1,1))
+```
+***
+## Linear Regression
+### Approach
+***
+In this section it is tried to explain the variable Page Values using linear regression models, because this variable has a high influence on Revenue. So it is interesting to know the relation of Page Values to the other variables. For this, the methods of backward elimination and forward selection are used. Finally, it is checked whether the quality of the model can be improved by a possible transformation.
+
+***
+
+### Correlation matrix
+```{r}
+shopper_sessions_numerical <- select(shopper_sessions, Administrative, Administrative_Duration, Informational, Informational_Duration, ProductRelated, ProductRelated_Duration, BounceRates, ExitRates, SpecialDay, PageValues)
+pairs(shopper_sessions_numerical)
+```
+### Revenue can't be part of the models
+```{r}
+shopper_sessions <- shopper_sessions[,1:17]
+```
+
+### Complete model
+```{r}
+completeModel <- lm(formula = PageValues ~ ., data = shopper_sessions)
+summary(completeModel)
+anova <- anova(completeModel)
+anova
+```
+### Backward elimination
+```{r}
+full.model <- lm(PageValues ~ ., 
+                 data = shopper_sessions)
+# stepwise
+step(object = full.model, # start at the full model
+    direction = "backward") # allow it remove predictors but not add them
+
+# the result of the best regression model it could find:
+lmBackward <- lm(PageValues ~ Administrative + ProductRelated + BounceRates + 
+    ExitRates + SpecialDay + Month + OperatingSystems + TrafficType + 
+    VisitorType, data = shopper_sessions)
+summary(lmBackward)
+anovaBackward <- anova(lmBackward)
+anovaBackward
+```
+### Forward selection
+```{r}
+null.model <- lm(PageValues ~ 1, shopper_sessions)
+step(object = null.model,
+     direction = "forward",
+     scope = PageValues ~ Administrative + Administrative_Duration + Informational + Informational_Duration + ProductRelated + ProductRelated_Duration + BounceRates + ExitRates + PageValues + SpecialDay + Month + OperatingSystems + Browser + Region + TrafficType + VisitorType + Weekend)
+
+# the result of the best regression model it could find:
+lm_forward <- lm(PageValues ~ ExitRates + BounceRates + VisitorType + 
+    OperatingSystems + TrafficType + SpecialDay + Month + Administrative + 
+    ProductRelated, data = shopper_sessions)
+summary(lm_forward)
+anovaForward <- anova(lm_forward)
+anovaForward
+```
+### Transformation of PageValue in order to increase R2
+```{r}
+plot(lm_forward)
+hist(lm_forward$residuals, main = "Histogram of residuals with Page Value")
+lm_sqrt <- lm(formula = sqrt(PageValues) ~ ExitRates + BounceRates + VisitorType + 
+    SpecialDay + Month + Browser + Administrative, data = shopper_sessions)
+summary(lm_sqrt)
+plot(lm_sqrt)
+hist(lm_sqrt$residuals, main = "Histogram of residuals with sqrt(Page Value)")
+```
+***
+
+## Clustering
+### Approach
+***
+In this section the goal is to grouping a session's behaviour concerning Bounce Rate & Exit Rate splitted by Revenue. Therefore, it Revenue is splitted into "no" and "yes". For every split the kmeans algorighm is performed. To pick the right k, the elbow criteria is used, which can be seen in wss. The clusters and the right pick for k (elbow criteria) is visualized.
+
+***
+
+### Clean Workspace
+```{r}
+rm(list = ls())
+```
+### Establish Connection
+```{r}
+mySQLConnection <- dbConnect(MySQL(),
+                             user = "bigdata",
+                             password = "password",
+                             dbname = "bigdata",
+                             host = "bigdata.cxeixakp0jsm.us-east-1.rds.amazonaws.com",
+                             port = 3306)
+```
+### Query Data
+```{r}
+# Send the query
+shopper_sessions <- dbSendQuery(mySQLConnection, "SELECT * FROM shopper_sessions")
+
+# fetch() converts the query results (stored on the server) to a local data frame
+shopper_sessions <- fetch(shopper_sessions, n = -1)
+```
+### Data transformation
+```{r}
+shopper_sessions$Administrative <- as.numeric(shopper_sessions$Administrative)
+shopper_sessions$Administrative_Duration <- as.numeric(shopper_sessions$Administrative_Duration)
+shopper_sessions$Informational <- as.numeric(shopper_sessions$Informational)
+shopper_sessions$Informational_Duration <- as.numeric(shopper_sessions$Informational_Duration)
+shopper_sessions$ProductRelated <- as.numeric(shopper_sessions$ProductRelated)
+shopper_sessions$ProductRelated_Duration <- as.numeric(shopper_sessions$ProductRelated_Duration)
+shopper_sessions$BounceRates <- as.numeric(shopper_sessions$BounceRates)
+shopper_sessions$ExitRates <- as.numeric(shopper_sessions$ExitRates)
+shopper_sessions$PageValues <- as.numeric(shopper_sessions$PageValues)
+shopper_sessions$SpecialDay <- as.numeric(shopper_sessions$SpecialDay)
+shopper_sessions$Month <- as.yearmon(shopper_sessions$Month, "%b")
+shopper_sessions$Month <- month(shopper_sessions$Month, label = TRUE)
+shopper_sessions$Weekend[shopper_sessions$Weekend == FALSE] <- "No"
+shopper_sessions$Weekend[shopper_sessions$Weekend == TRUE] <- "Yes"
+shopper_sessions$Revenue[shopper_sessions$Revenue == FALSE] <- "No"
+shopper_sessions$Revenue[shopper_sessions$Revenue == TRUE] <- "Yes"
+shopper_sessions$RevenueNum <- if_else(shopper_sessions$Revenue == "No", 0, 1)
+shopper_sessions$ID <- c(1:length(shopper_sessions$Administrative))
+```
+***
+### Revenue = "no"
+#### Plot relationship
+```{r}
+cluster_dataset <- subset(shopper_sessions, Revenue == "No", select = c(BounceRates, ExitRates, Revenue))
+
+# Plot 
+ggplot(data = cluster_dataset, mapping = aes(BounceRates, ExitRates, color = Revenue)) +
+  geom_point() +
+  labs(title = "Bounce vs. Exit Rates (Revenue = no)")
+```
+#### Set the random seed
+```{r}
+set.seed(20)
+```
+#### Extract only Bounce Rate and Exit Rate data for clustering
+```{r}
+Rate <- data.frame(length = cluster_dataset$BounceRates, width = cluster_dataset$ExitRates)
+head(Rate)
+```
+#### Perform Algorithm
+##### Perform kmeans with k set to 4
+```{r}
+RateCluster <- kmeans(Rate, centers =  4, nstart = 25)
+print(RateCluster)
+```
+#### Verification and Visualization
+##### Verfication
+```{r}
+table(RateCluster$cluster, cluster_dataset$Revenue)
+```
+##### Add the cluster assignment to each point
+```{r}
+cluster_dataset$Cluster <- as.factor(RateCluster$cluster)
+```
+##### Get centroids
+```{r}
+centroids <- as.data.frame(RateCluster$centers)
+centroids$Cluster <- as.factor(c(1:4))
+```
+##### Visualize cluster assignments
+```{r}
+ggplot(data = cluster_dataset, mapping = aes(BounceRates, ExitRates, color = Cluster)) +
+  geom_point() +
+  geom_point(data = centroids, aes(length, width, fill = Cluster), size = 5, shape = 13) +
+  labs(title = "Cluster between Exit & Bounce Rates (Revenue = no)")
+```
+#### Picking K
+##### For each k, perform WSS, store the value
+```{r}
+wss <- numeric(15)
+for (k in 1:15) {
+  wss[k] = sum(kmeans(Rate, k, nstart = 25)$withinss)
+}
+```
+##### Make a data frame out of the WSS results
+```{r}
+wssResults <- data.frame(k = c(1:15), wss = wss)
+wssResults
+```
+##### Visualize WSS
+```{r}
+ggplot(data = wssResults, mapping = aes(x = k, y = wss)) +
+  geom_point() +
+  geom_line() + 
+  labs(title = "K-means (Revenue = no)", x = "Number of Clusters k", y = "Within Sum of Squares")
+```
+***
+### Revenue = "yes"
+#### Plot relationship
+```{r}
+cluster_dataset <- subset(shopper_sessions, Revenue == "Yes", select = c(BounceRates, ExitRates, Revenue))
+
+# Plot 
+ggplot(data = cluster_dataset, mapping = aes(BounceRates, ExitRates, color = Revenue)) +
+  geom_point() +
+  geom_point() +
+  labs(title = "Bounce vs. Exit Rates (Revenue = yes)")
+```
+#### Set the random seed
+```{r}
+set.seed(20)
+```
+#### Extract only Bounce Rate and Exit Rate data for clustering
+```{r}
+Rate <- data.frame(length = cluster_dataset$BounceRates, width = cluster_dataset$ExitRates)
+head(Rate)
+```
+#### Perform Algorithm
+##### Perform kmeans with k set to 3
+```{r}
+RateCluster <- kmeans(Rate, centers =  4, nstart = 25)
+print(RateCluster)
+```
+#### Verification and Visualization
+##### Verfication
+```{r}
+table(RateCluster$cluster, cluster_dataset$Revenue)
+```
+##### Add the cluster assignment to each point
+```{r}
+cluster_dataset$Cluster <- as.factor(RateCluster$cluster)
+```
+##### Get centroids
+```{r}
+centroids <- as.data.frame(RateCluster$centers)
+centroids$Cluster <- as.factor(c(1:4))
+```
+##### Visualize cluster assignments
+```{r}
+ggplot(data = cluster_dataset, mapping = aes(BounceRates, ExitRates, color = Cluster)) +
+  geom_point() +
+  geom_point(data = centroids, aes(length, width, fill = Cluster), size = 5, shape = 13) +
+  labs(title = "Cluster between Exit & Bounce Rates (Revenue = yes)")
+```
+#### Picking K
+##### For each k, perform WSS, store the value
+```{r}
+wss <- numeric(15)
+for (k in 1:15) {
+  wss[k] = sum(kmeans(Rate, k, nstart = 25)$withinss)
+}
+```
+##### Make a data frame out of the WSS results
+```{r}
+wssResults <- data.frame(k = c(1:15), wss = wss)
+wssResults
+```
+##### Visualize WSS
+```{r}
+ggplot(data = wssResults, mapping = aes(x = k, y = wss)) +
+  geom_point() +
+  geom_line() + 
+  labs(title = "K-means (Revenue = yes)", x = "Number of Clusters k", y = "Within Sum of Squares")
+```
+
+## Time Series Analysis
+### Approach
+***
+In this section the variable PageValue is examined over the consecutive months. Since the number of months is small, the significance of this analysis will be limited.
+
+***
+### Visualize data
+```{r}
+# Summarise the mean PageValues per month
+PageValue_Month <- shopper_sessions %>%
+  select(c(PageValues, Month)) %>%
+  filter(Month > "Mar") %>%
+  group_by(Month) %>%
+  summarise(PageValues = mean(PageValues))
+PageValue_Month
+# Plot
+ggplot(data = PageValue_Month, mapping = aes(x = Month, y = PageValues)) +
+  geom_col() +
+  geom_text(aes(label = round(PageValues, 4)), position = position_stack(vjust = 0.5), col = "white") +
+  labs(title = "PageValues per Month")
+  
+```
+
+### Dataset
+```{r}
+time_series <- subset(shopper_sessions, Month > "Mar", select = c(Month, PageValues))
+time_series$Month <- as.yearmon(time_series$Month, "%b")
+time_series$Month <- month(time_series$Month, label = T)
+head(time_series)
+```
+### Create time-series object
+```{r}
+shopper_sessions_TS <- ts(time_series$PageValues, start = 5, end = 12, frequency = 8)
+shopper_sessions_TS
+```
+### Decompose the time series
+```{r}
+Month_pagevalueDecomposition <- decompose(shopper_sessions_TS)
+```
+### Plot the decomposition
+```{r}
+plot(Month_pagevalueDecomposition)
+```
+### Create Training and Testing Sets
+```{r}
+# training set: May to 1956
+train = window(shopper_sessions_TS, start = 5, end = 10)
+
+# test set:  1957 to 1960 
+test = window(shopper_sessions_TS, start = 11, end = 12)
+```
+### Model
+#### ARIMA Model
+```{r}
+arimaModel <- auto.arima(train)
+arimaForecast <- forecast(arimaModel, h = 2)
+arimaForecast
+```
+### Visualizations
+#### History and Predictions
+```{r}
+plot(arimaForecast, main = "PageValues", ylab = "PageValues", xlab = "Months")
+lines(test, col="red")
+legend("topleft", lty = 1, bty = "n", col = c("red","blue"), c("Actual","Predicted"))
+```
+### Only the predictions
+```{r}
+arimaMean <-arimaForecast$mean
+
+plot(test, main = "PageValues", ylab = "PageValues", xlab = "Months", col = "darkblue")  
+lines(arimaMean, col="red")
+legend("topleft", lty = 1,bty = "n", col = c("red","blue"), c("Predicted","Actual"))
+```
