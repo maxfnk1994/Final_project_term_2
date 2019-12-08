@@ -15,8 +15,7 @@ https://archive.ics.uci.edu/ml/datasets/Online+Shoppers+Purchasing+Intention+Dat
 ## Workspace preparation
 ### Approach
 ***
-In this section the workspace will be prepared. 
-This means that first the global environment will be cleaned and all required packages will be loaded. 
+In this section the workspace will be prepared. This means that first the global environment will be cleaned and all required packages will be loaded. 
 The data is hosted in a database in the aws Cloud and is loaded into R via a SQL connection. 
 The data is transformed into R accordingly (ELT).
 
@@ -115,9 +114,8 @@ shopper_sessions$ID <- c(1:length(shopper_sessions$Administrative))
 ***
 In this section the data are examined in more detail (exploratory data analysis). 
 The focus is on the target variable "Revenue". 
-Thus the relations of the different variables in connection with the characteristics 
-Revenue = yes and Revenue = no are examined. 
-Finally, the correlations are presented.
+Thus the relations of the different variables in connection with the characteristics Revenue = yes and Revenue = no are 
+examined. Finally, the correlations are presented.
 
 ***
 
@@ -310,13 +308,21 @@ print(cor)
 corrplot <- corrplot(cor, method = "square")
 print(corrplot)
 ```
+
+### Summary
+***
+Analysis concerning the target variable Revenue shows that there are big differences between Revenue = Yes and Revenue = No 
+inspected by e.g. PageValues or Special day. If these differences are significant will be analysed in the next section 
+Hypothesis Testing.
+
+***
+
 ## Hypothesis Testing
 ### Approach
 ***
-In this section different hypotheses regarding Revenue are examined. 
-In preparation, all box plots of numerical variables, divided by revenue (yes, no), are presented. 
-For the most part, the observations from the exploratory data analysis are confirmed. 
-Thus, the mean value of Page Values in the case of Revenue = yes is significant greater.
+In this section different hypotheses regarding Revenue are examined. In preparation, all box plots of numerical variables, 
+divided by revenue (yes, no), are presented. For the most part, the observations from the exploratory data analysis are 
+confirmed. Thus, the mean value of Page Values in the case of Revenue = yes is significant greater.
 
 ***
 
@@ -399,19 +405,25 @@ wilcox.test(formula = SpecialDay ~ Revenue, data = shopper_sessions, paired = FA
 ```
 Reject H0, there is sufficient evidence to warrant rejection of the claim that the means are equal --> H1: Mean No for Page Values is greater (muN>muY)
 
+### Summary
+***
+It could be statistically proven that significant differences between Revenue = yes and Revenue = no regarding variables in 
+the data set, such as bounce rates:
+It could be demonstrated that if Revenue = no, the Bounce Rates are greater in comparison Revenue = yes. This approach in 
+conclusion can be transferred to all Hypothesis tests.
+
 ***
 
 ## Model Building & Prediction
 ### Approach
 ***
-In this section the models to answer the main problem are built and predicted. 
-First the workspace is cleaned again and the dataset is imported in raw version (connection to Cloud Database). 
-In addition, the data is then transformed. 
-The findings from the previous analyses are implemented. 
-Thus rare instances of selected categorical variables are combined, e.g. 
-Operating System with the characteristics 5,6,7,8 to "Other". 
-In preparation for the models, the data set is divided with the ratio 3:1 into training and test data with a random seed. 
-The models are trained with the training data and later evaluated with the test data.
+In this section the models to answer the main problem are built and predicted. First the workspace is cleaned again and the 
+dataset is imported in raw version (connection to Cloud Database). In addition, the data is then transformed. 
+The findings from the previous analyses are implemented. Thus rare instances of selected categorical variables are combined, 
+e.g. Operating System with the characteristics 5,6,7,8 to "Other". 
+In preparation for the models, the data set is divided with the ratio 3:1 into training and test data with a random seed. The 
+models are trained with the training data and later evaluated with the test data.
+
 The following models are built to identify potential buyers:
 1. Logistic Regression Model
 2. Decision Tree (rpart)
@@ -549,7 +561,9 @@ dt_model2 <- ctree(Revenue ~ ., data = train)
 ```{r}
 plot(dt_model2)
 ```
+
 ***
+
 ### Naive Bayes
 ```{r}
 nb_model <- naiveBayes(Revenue ~ ., data = train, laplace = 20)
@@ -563,20 +577,35 @@ pred_test_dt <- predict(dt_model, newdata = test, type = "class")
 pred_test_dt2 <- predict(dt_model2, test)
 pred_test_nb <- predict(nb_model, newdata = test, type = "class")
 ```
+
+### Summary
+***
+logistic regression model is rebuilt with only significantly important variables. The formula of new logistic model is:
+Revenue = -1.980645 + 0.005385 * Product Related -  19.603015 * Exit Rate + 0.081696 Page Value – 0.867538 Special Day
+
+The rpart tree model is first built with complexity parameter equaling 0.0001, and then the model is optimized with 
+complexity parameter equaling 0.001. 
+
+The ctree tree model is built. First cut is PageValues and then Month and PageValues.
+
+In naive bayes model, laplace is 20 to reduce the effect of unavailable records in the train set.
+
+***
+
+
 ## Performance Measurement
 ### Approach
 ***
-In this section the models are evaluated according two criteria Accuracy & AUC values, 
-whereby the decision for the best model is made on the basis of Accuracy.
-In order to calculate the accuracy, the confusion matrixes are first established, whereby the predictions still have to be
-transformed with regard to the "logistic regression" model into "yes" and "no". 
-Using the elements of the confusion matrix (TP,TN,FP,FN) and the other results (Actual and Prediction data frame), the 
-accuracy is calculated and presented. 
-Finally, it is examined whether there is a significant difference between the models with regard to accuracy. 
-The package ROCR is used to calculate the AUC values and ROC curves. 
-Therefore, a prediction obejct is first created that brings the input data into a standardized form. 
-Then ROC and AUC are determined and plotted with the ROC curves of all models with corresponding AUC values. 
-Finally, the extent to which the training vs. test ROC and AUC values differ is examined with regard to overfitting. 
+In this section the models are evaluated according two criteria Accuracy & AUC values, whereby the decision for the best 
+model is made on the basis of Accuracy.
+In order to calculate the accuracy, the confusion matrixes are first established, whereby the predictions still have to be 
+transformed with regard to the "logistic regression" model into "yes" and "no". Using the elements of the confusion matrix 
+(TP,TN,FP,FN) and the other results (Actual and Prediction data frame), the accuracy is calculated and presented. Finally, it 
+is examined whether there is a significant difference between the models with regard to accuracy. 
+The package ROCR is used to calculate the AUC values and ROC curves. Therefore, a prediction obejct is first created that 
+brings the input data into a standardized form. Then ROC and AUC are determined and plotted with the ROC curves of all models 
+with corresponding AUC values. Finally, the extent to which the training vs. test ROC and AUC values differ is examined with 
+regard to overfitting. 
 
 ***
 
@@ -711,7 +740,15 @@ aov <- aov(Accuracy ~ Model, data = TruePositive)
 summary(aov)
 TukeyHSD(aov)
 ```
+
+### Summary
 ***
+The best fitted model is rpart decision tree. Concerning anova, there is significant difference between the models concerning 
+accuracy (H0: means of the accuracy values are equal between the models) --> p-value = <2e-16 < 0.05, reject H0.
+There is sufficient evidence to warrant rejection of the claim that the Accuracy from the models are equal (TukeyHSD Test: 
+Logistic regression is significant different).
+***
+
 ### Performance Measurement (ROCR)
 ### Prediction with probalities
 ```{r}
@@ -829,15 +866,21 @@ legend("bottomright", legend = c(paste0("Logistic Regression Train (AUC = ", auc
                                  paste0("Logistic Regression Test (AUC = ", auc_test_glm, ")")),
        col = c("black", "red"), lty = c(1,1))
 ```
+
+### Summary
 ***
+Concerning the AUC values ctree is performaing the best. For this project the performance measuerment is focusing on 
+accuracy. Regardless this, there is no big difference between Train ROC and Test ROC for all models, so there is no 
+overfitting.
+***
+
 ## Linear Regression
 ### Approach
 ***
 In this section it is tried to explain the variable Page Values using linear regression models, because this variable has a 
-high influence on Revenue. 
-So it is interesting to know the relation of Page Values to the other variables. 
-For this, the methods of backward elimination and forward selection are used. Finally, it is checked whether the quality of 
-the model can be improved by a possible transformation.
+high influence on Revenue. So it is interesting to know the relation of Page Values to the other variables. For this, the 
+methods of backward elimination and forward selection are used. Finally, it is checked whether the quality of the model can 
+be improved by a possible transformation.
 
 ***
 
@@ -899,15 +942,22 @@ summary(lm_sqrt)
 plot(lm_sqrt)
 hist(lm_sqrt$residuals, main = "Histogram of residuals with sqrt(Page Value)")
 ```
+
+### Summary
+***
+Both methods (forward selection, backwards elimination) show the same result, the explanation of Page Value is concerning R2 
+low.
+The transformation shows an increased R2 but the total R2 is still low.
+
 ***
 
 ## Clustering
 ### Approach
 ***
 In this section the goal is to grouping a session's behaviour concerning Bounce Rate & Exit Rate splitted by Revenue. 
-Therefore, it Revenue is splitted into "no" and "yes". 
-For every split the kmeans algorighm is performed. To pick the right k, the elbow criteria is used, which can be seen in wss. 
-The clusters and the right pick for k (elbow criteria) is visualized.
+Therefore, it Revenue is splitted into "no" and "yes". For every split the kmeans algorighm is performed. To pick the right 
+k, the elbow criteria is used, which can be seen in wss. The clusters and the right pick for k (elbow criteria) is 
+visualized.
 
 ***
 
@@ -1089,10 +1139,18 @@ ggplot(data = wssResults, mapping = aes(x = k, y = wss)) +
   labs(title = "K-means (Revenue = yes)", x = "Number of Clusters k", y = "Within Sum of Squares")
 ```
 
+### Summary
+***
+The best k to pick is for both cases 4.
+Clustering does not allow any grouping between bounce and exit rate in terms of revenue.
+
+***
+
 ## Time Series Analysis
 ### Approach
 ***
-In this section the variable PageValue is examined over the consecutive months. Since the number of months is small, the significance of this analysis will be limited.
+In this section the variable PageValue is examined over the consecutive months. Since the number of months is small, the 
+significance of this analysis will be limited.
 
 ***
 ### Visualize data
@@ -1152,7 +1210,7 @@ arimaForecast
 ```{r}
 plot(arimaForecast, main = "PageValues", ylab = "PageValues", xlab = "Months")
 lines(test, col="red")
-legend("topleft", lty = 1, bty = "n", col = c("red","blue"), c("Actual","Predicted"))
+legend("topright", lty = 1, bty = "n", col = c("red","blue"), c("Actual","Predicted"))
 ```
 ### Only the predictions
 ```{r}
@@ -1162,3 +1220,11 @@ plot(test, main = "PageValues", ylab = "PageValues", xlab = "Months", col = "dar
 lines(arimaMean, col="red")
 legend("topleft", lty = 1,bty = "n", col = c("red","blue"), c("Predicted","Actual"))
 ```
+
+### Summary
+***
+Time Series analysis is for this dataset not the best choice, because the time period is too short. 
+The result of this analysis can be taken as an incentive to improve data quality by collecting data over a longer period of 
+time.
+
+***
